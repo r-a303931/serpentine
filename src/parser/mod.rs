@@ -1,3 +1,18 @@
+// Copyright (C) 2023 Andrew Rioux
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 use std::sync::Arc;
 
 use crate::{
@@ -156,7 +171,16 @@ pub fn parse_next<'a, 'b>(
         TokenType::QuoteSymbol(symb) => Ok((SExpr::QuoteSymbol(symb), &tokens[1..])),
         TokenType::UnquoteSymbol(symb) => Ok((SExpr::UnquoteSymbol(symb), &tokens[1..])),
         TokenType::ListSpliceSymbol(symb) => Ok((SExpr::ListSpliceSymbol(symb), &tokens[1..])),
-        TokenType::String(string) => Ok((SExpr::String(Arc::from(string.iter().collect::<String>().replace("\\\"", "\"").replace("\\n", "\n"))), &tokens[1..])),
+        TokenType::String(string) => Ok((
+            SExpr::String(Arc::from(
+                string
+                    .iter()
+                    .collect::<String>()
+                    .replace("\\\"", "\"")
+                    .replace("\\n", "\n"),
+            )),
+            &tokens[1..],
+        )),
         TokenType::FuncSymbol(symb) => Ok((SExpr::FuncSymbol(symb), &tokens[1..])),
         TokenType::Symbol(symb) => {
             let symbstr: String = symb.iter().collect();
@@ -345,40 +369,77 @@ mod test {
 
     #[test]
     fn lisp_lit_into_val() {
-        assert_eq!(SExpression::Int(9), lisp_lit!{ [9] });
+        assert_eq!(SExpression::Int(9), lisp_lit! { [9] });
     }
 
     #[test]
     fn lisp_lit_basic_expr() {
         let SExpression::Expr(_, v) = lisp_lit!{ ([1] [2] ["test"]) } else { panic!("could not create expression"); };
 
-        assert_eq!(v, vec![SExpression::Int(1), SExpression::Int(2), SExpression::String("test".into())]);
+        assert_eq!(
+            v,
+            vec![
+                SExpression::Int(1),
+                SExpression::Int(2),
+                SExpression::String("test".into())
+            ]
+        );
     }
 
     #[test]
     fn lisp_lit_quote_symb() {
-        assert_eq!(SExpression::QuoteSymbol("test".into()), lisp_lit!{ (quote "test") });
+        assert_eq!(
+            SExpression::QuoteSymbol("test".into()),
+            lisp_lit! { (quote "test") }
+        );
     }
 
     #[test]
     fn lisp_lit_quote_expr() {
         let SExpression::Quote(_, v) = lisp_lit!{ (quote ([1] [2] ["test"])) } else { panic!("could not create expression"); };
-        assert_eq!(v, vec![SExpression::Int(1), SExpression::Int(2), SExpression::String("test".into())]);
+        assert_eq!(
+            v,
+            vec![
+                SExpression::Int(1),
+                SExpression::Int(2),
+                SExpression::String("test".into())
+            ]
+        );
     }
 
     #[test]
     fn lisp_lit_unquote() {
         let SExpression::UnquoteExpression(_, v) = lisp_lit!{ ,([1] [2] ["test"]) } else { panic!("could not create expression"); };
-        assert_eq!(v, vec![SExpression::Int(1), SExpression::Int(2), SExpression::String("test".into())]);
+        assert_eq!(
+            v,
+            vec![
+                SExpression::Int(1),
+                SExpression::Int(2),
+                SExpression::String("test".into())
+            ]
+        );
 
-        assert_eq!(lisp_lit!{ ,"test" }, SExpression::UnquoteSymbol("test".into()));
+        assert_eq!(
+            lisp_lit! { ,"test" },
+            SExpression::UnquoteSymbol("test".into())
+        );
     }
 
     #[test]
     fn lisp_lit_splice() {
         let SExpression::ListSpliceExpr(_, v) = lisp_lit!{ ,@([1] [2] ["test"]) } else { panic!("could not create expression"); };
-        assert_eq!(v, vec![SExpression::Int(1), SExpression::Int(2), SExpression::String("test".into())]);
+        assert_eq!(
+            v,
+            vec![
+                SExpression::Int(1),
+                SExpression::Int(2),
+                SExpression::String("test".into())
+            ]
+        );
 
-        assert_eq!(lisp_lit!{ ,@"test" }, SExpression::ListSpliceSymbol("test".into()));
+        assert_eq!(
+            lisp_lit! { ,@"test" },
+            SExpression::ListSpliceSymbol("test".into())
+        );
     }
 }

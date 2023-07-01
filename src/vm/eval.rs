@@ -1,17 +1,31 @@
-use std::{
-    collections::HashMap,
-    sync::{atomic::{AtomicU64, Ordering}, Arc, RwLock}
+// Copyright (C) 2023 Andrew Rioux
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, RwLock,
 };
 
 use async_recursion::async_recursion;
-use futures::future::join_all;
 
 use crate::Position;
 
 use super::{
-    error::{RuntimeError, RuntimeErrorKind, add_frame},
-    Callable, Environment, LispFunc, LispValue, List, SExpression, SharedContainer,
-    Symbol, EnvironmentBuilder
+    error::{add_frame, RuntimeError, RuntimeErrorKind},
+    Callable, Environment, EnvironmentBuilder, LispFunc, LispValue, List, SExpression,
+    SharedContainer, Symbol,
 };
 
 fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
@@ -336,7 +350,9 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
     macro_rules! fname {
         ($ind:expr) => {
             match &args[$ind] {
-                SExpression::Symbol(s) if s.contains(':') => throw!(InvalidFunctionName(Arc::clone(s))),
+                SExpression::Symbol(s) if s.contains(':') => {
+                    throw!(InvalidFunctionName(Arc::clone(s)))
+                }
                 SExpression::Symbol(s) => Symbol::from(s),
                 other => throw_wta!("Symbol", other.get_pretty_name()),
             }
@@ -480,9 +496,9 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
 
             match eval_one(ctx.clone(), pos, env.clone(), &args[0]).await {
                 Ok(v) => Some(Ok(v)),
-                Err(e) => Some(Ok(Arc::new(LispValue::Error(e))))
+                Err(e) => Some(Ok(Arc::new(LispValue::Error(e)))),
             }
-        },
+        }
         // "error" => None,
         _ => None,
     }
@@ -520,22 +536,29 @@ async fn execute_callable<T: Clone + Send + Sync>(
 
     macro_rules! eval_func {
         ($lf:expr, $args:expr) => {{
-            let parent_env = $lf.env.clone()
+            let parent_env = $lf
+                .env
+                .clone()
                 .map_or_else(|| Environment::get_global(env.clone(), pos), Ok)?;
 
-            let arg_names: Vec<Symbol> = $lf.args
+            let arg_names: Vec<Symbol> = $lf
+                .args
                 .iter()
                 .map(|a| match a {
                     SExpression::Symbol(s) => Ok(s.into()),
-                    other => throw!(InvalidFunctionDefinition(other.get_pretty_name().into()))
+                    other => throw!(InvalidFunctionDefinition(other.get_pretty_name().into())),
                 })
                 .collect::<Result<_, _>>()?;
 
             let arg_vars = arg_names.into_iter().zip($args).collect();
 
-            let new_env = EnvironmentBuilder::new_from_parent(parent_env, Some($lf.name.0.clone()), pos.clone())
-                .set_variables(arg_vars)
-                .build();
+            let new_env = EnvironmentBuilder::new_from_parent(
+                parent_env,
+                Some($lf.name.0.clone()),
+                pos.clone(),
+            )
+            .set_variables(arg_vars)
+            .build();
             let new_env = Arc::new(RwLock::new(new_env));
 
             let mut ret_val = Arc::new(LispValue::Nil);
@@ -547,7 +570,7 @@ async fn execute_callable<T: Clone + Send + Sync>(
             }
 
             ret_val
-        }}
+        }};
     }
 
     match callable {
@@ -569,16 +592,14 @@ async fn execute_callable<T: Clone + Send + Sync>(
             let args = eval_args!();
             anf.run((&ctx, pos), env, args).await
         }
-        Callable::Func(lf) => {
-            Ok(eval_func!(lf, eval_args!().into_iter().map(RwLock::new)))
-        }
+        Callable::Func(lf) => Ok(eval_func!(lf, eval_args!().into_iter().map(RwLock::new))),
         Callable::Macro(lm) => {
             let args = eval_quotes(args);
             let new_ast = eval_func!(lm, args.into_iter().map(RwLock::new));
 
             match new_ast.serialize(pos, true) {
                 None => Ok(new_ast),
-                Some(ast) => eval_one(ctx, pos, env, &ast).await
+                Some(ast) => eval_one(ctx, pos, env, &ast).await,
             }
         }
     }

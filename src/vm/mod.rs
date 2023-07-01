@@ -1,15 +1,28 @@
+// Copyright (C) 2023 Andrew Rioux
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 use std::{
     collections::HashMap,
     fmt::{self, Debug},
     hash::Hash,
     iter::{FromIterator, IntoIterator},
-    mem,
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-#[macro_use]
-use crate::{parser::SExpression, Position, lisp_lit};
+use crate::{lisp_lit, parser::SExpression, Position};
 
 pub mod error;
 pub mod eval;
@@ -239,8 +252,7 @@ impl<T> Callable<T> {
     }
 }
 
-pub trait ForeignObject: std::any::Any + Debug {
-}
+pub trait ForeignObject: std::any::Any + Debug {}
 
 pub enum LispValue<T> {
     Nil,
@@ -307,14 +319,22 @@ impl<T> LispValue<T> {
                 Callable::AsyncNativeFunc(n, _) => SExpression::FuncSymbol((*n).into()),
                 Callable::NativeMacro(n, _) => SExpression::FuncSymbol((*n).into()),
                 Callable::AsyncNativeMacro(n, _) => None?,
-                Callable::Func(f) if f.env.is_none() => SExpression::Expr(p.clone(), [
-                    &[SExpression::Symbol("function".into()), SExpression::Expr(p.clone(), f.args.clone())][..],
-                    &f.body.clone()
-                ].concat().to_vec()),
+                Callable::Func(f) if f.env.is_none() => SExpression::Expr(
+                    p.clone(),
+                    [
+                        &[
+                            SExpression::Symbol("function".into()),
+                            SExpression::Expr(p.clone(), f.args.clone()),
+                        ][..],
+                        &f.body.clone(),
+                    ]
+                    .concat()
+                    .to_vec(),
+                ),
                 Callable::Func(_) => None?,
                 Callable::Macro(_) => None?,
             },
-            LispValue::Error(err) => lisp_lit!{
+            LispValue::Error(err) => lisp_lit! {
                 {p};
                 ((sym "error")
                  {match err.kind() {
@@ -722,7 +742,13 @@ impl<T> Environment<T> {
         self.functions.insert(name, RwLock::new(func));
     }
 
-    fn set_variable_internal(&mut self, name: &Symbol, value: &Arc<LispValue<T>>, frame_name: &Arc<str>, call_position: &Position) -> Result<bool, RuntimeError> {
+    fn set_variable_internal(
+        &mut self,
+        name: &Symbol,
+        value: &Arc<LispValue<T>>,
+        frame_name: &Arc<str>,
+        call_position: &Position,
+    ) -> Result<bool, RuntimeError> {
         if let Some(var) = self.variables.get(name) {
             let var_int =
                 var.write()
@@ -743,10 +769,14 @@ impl<T> Environment<T> {
         } else {
             Ok(false)
         }
-
     }
 
-    pub fn set_variable(&mut self, name: Symbol, value: Arc<LispValue<T>>, call_position: &Position) -> Result<(), RuntimeError> {
+    pub fn set_variable(
+        &mut self,
+        name: Symbol,
+        value: Arc<LispValue<T>>,
+        call_position: &Position,
+    ) -> Result<(), RuntimeError> {
         let frame_name = self.get_environment_name(&call_position)?;
 
         if !self.set_variable_internal(&name, &value, &frame_name, call_position)? {
@@ -790,7 +820,7 @@ pub fn as_matcher<'a>(sexpr: &'a SExpression) -> VmSExpr<'a> {
         SExpression::Quote(_, e) => VmSExpr::Quote(&*e),
         SExpression::Backquote(_, e) => VmSExpr::Backquote(&*e),
         SExpression::UnquoteExpression(_, e) => VmSExpr::UnquoteExpression(&*e),
-        SExpression::ListSpliceExpr(_, e) => VmSExpr::ListSpliceExpr(&*e)
+        SExpression::ListSpliceExpr(_, e) => VmSExpr::ListSpliceExpr(&*e),
     }
 }
 
