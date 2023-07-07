@@ -213,7 +213,7 @@ pub fn declare_lisp_func(input: TokenStream) -> TokenStream {
     let lisprs = (if is_local {
         quote! { crate }
     } else {
-        quote! { ::lisprs }
+        quote! { ::serpentine_macro }
     })
     .to_token_stream();
 

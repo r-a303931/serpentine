@@ -608,7 +608,7 @@ async fn execute_callable<T: Clone + Send + Sync>(
         Callable::Func(lf) => Ok(eval_func!(lf, eval_args!().into_iter().map(RwLock::new))),
         Callable::Macro(lm) => {
             let args = eval_quotes(args);
-            let new_ast = eval_func!(lm, args.into_iter().map(RwLock::new));
+            let new_ast = eval_func!(lm, args.iter().map(RwLock::new));
 
             match new_ast.serialize(pos, true) {
                 None => Ok(new_ast),
@@ -921,7 +921,7 @@ mod test {
         assert_matches!(err.kind(), RuntimeErrorKind::InvalidFunction(_));
     });
 
-    lispfn_macro::declare_lisp_func!(local ret_1 "ret-1" (_pos, _env) LispValue::Int(1).into());
+    serpentine_macro::declare_lisp_func!(local ret_1 "ret-1" (_pos, _env) LispValue::Int(1).into());
     write_eval_test!(fn test_eval_func ("(ret_1)" => LispValue::Int(1), (
         ret_1 => LispValue::Callable(ret_1::new())
     )));
@@ -934,7 +934,7 @@ mod test {
         ret_1 => LispValue::Callable(ret_1::new())
     )));
 
-    lispfn_macro::declare_lisp_func!(local inc_1 "inc-1" (ctx: Arc<Mutex<u8>>, _pos, _env) {
+    serpentine_macro::declare_lisp_func!(local inc_1 "inc-1" (ctx: Arc<Mutex<u8>>, _pos, _env) {
         let mut inner = ctx.lock().expect("could not get counter");
         *inner += 1;
         LispValue::Int((*inner).into()).into()
@@ -978,7 +978,7 @@ mod test {
 
     write_eval_test!(fn test_defun_call ("(progn (defun test () 3) (test))" => LispValue::Int(3)));
 
-    lispfn_macro::declare_lisp_func!(local add_1 "add_1" (_pos, _env, arg: Int) {
+    serpentine_macro::declare_lisp_func!(local add_1 "add_1" (_pos, _env, arg: Int) {
         LispValue::Int(arg + 1).into()
     });
     write_eval_test!(fn test_macro_call ("(progn \n\

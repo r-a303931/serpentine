@@ -54,44 +54,27 @@ pub struct ListItem<T> {
 
 impl<T> List<T> {
     /// Converts a List into an Iterator with shared references
-    pub fn iter<'a>(&'a self) -> ListIter<'a, T> {
-        ListIter { head: &self.head }
+    pub fn iter(&self) -> ListIter<T> {
+        ListIter {
+            head: self.head.clone(),
+        }
     }
 }
 
 impl<T, In: Into<Arc<LispValue<T>>>> FromIterator<In> for List<T> {
     fn from_iter<I: IntoIterator<Item = In>>(iter: I) -> Self {
-        let mut iter = iter.into_iter();
+        let mut item_stack = iter.into_iter().collect::<Vec<_>>();
 
-        let Some(first_item) = iter.next() else {
-            return List { head: None };
-        };
+        let mut head = None;
 
-        let mut head = Some(Box::new(ListItem {
-            cons: first_item.into(),
-            cdr: None,
-        }));
-
-        let mut head_ptr = &mut head;
-
-        for item in iter {
-            head_ptr.as_mut().unwrap().cdr = Some(Box::new(ListItem {
+        while let Some(item) = item_stack.pop() {
+            head = Some(Arc::new(ListItem {
                 cons: item.into(),
-                cdr: None,
-            }));
-            head_ptr = &mut (head_ptr.as_mut().unwrap().cdr);
+                cdr: head,
+            }))
         }
 
         List { head }
-    }
-}
-
-impl<T> IntoIterator for List<T> {
-    type Item = Arc<LispValue<T>>;
-    type IntoIter = ListIterator<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        ListIterator { head: self.head }
     }
 }
 
@@ -101,39 +84,20 @@ impl<T> Debug for List<T> {
     }
 }
 
-/// Holds a reference to the current head that is used
-pub struct ListIterator<T> {
+pub struct ListIter<T> {
     head: Option<Arc<ListItem<T>>>,
 }
 
-impl<T> Iterator for ListIterator<T> {
-    type Item = Arc<LispValue<T>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.head.take() {
-            None => None,
-            Some(val) => {
-                let ListItem { cons, cdr } = *val;
-                self.head = cdr;
-                Some(cons)
-            }
-        }
-    }
-}
-
-pub struct ListIter<'a, T> {
-    head: &'a Option<Box<ListItem<T>>>,
-}
-
-impl<'a, T> Iterator for ListIter<'a, T> {
+impl<T> Iterator for ListIter<T> {
     type Item = Arc<LispValue<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.head.as_ref() {
             None => None,
             Some(val) => {
-                self.head = &val.cdr;
-                Some(Arc::clone(&val.cons))
+                let cons = Arc::clone(&val.cons);
+                self.head = val.cdr.clone();
+                Some(cons)
             }
         }
     }
@@ -839,7 +803,7 @@ pub fn as_matcher<'a>(sexpr: &'a SExpression) -> VmSExpr<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use lispfn_macro::declare_lisp_func;
+    use serpentine_macro::declare_lisp_func;
 
     #[test]
     fn macro_expansions() {

@@ -1,5 +1,5 @@
 [package]
-name = "lispfn-macro"
+name = "serpentine-macro"
 version = "0.1.0"
 edition = "2021"
 
