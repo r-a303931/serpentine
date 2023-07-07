@@ -29,20 +29,31 @@ pub mod eval;
 
 use error::{convert_to_error, man_convert_to_err, RuntimeError, RuntimeErrorKind};
 
+/// Alias for the type of container used to share environments between different
+/// executions of lisp functions
 pub type SharedContainer<T> = Arc<RwLock<T>>;
+
+/// Refers to a mutable reference to a variable. LispValues are immutable, so they
+/// a mutable reference just means it can change which immutable value it points to
 pub type MutVarRef<T> = RwLock<Arc<LispValue<T>>>;
+
+/// Likewise for [`MutVarRef`], but for functions
 pub type MutFuncRef<T> = RwLock<Callable<T>>;
 
+/// Represents the List data structure in the Lisp environment
 pub struct List<T> {
-    head: Option<Box<ListItem<T>>>,
+    head: Option<Arc<ListItem<T>>>,
 }
 
+/// Holds the reference to an item in the lisp list, as well as potentially to the
+/// rest of the list
 pub struct ListItem<T> {
     cons: Arc<LispValue<T>>,
-    cdr: Option<Box<ListItem<T>>>,
+    cdr: Option<Arc<ListItem<T>>>,
 }
 
 impl<T> List<T> {
+    /// Converts a List into an Iterator with shared references
     pub fn iter<'a>(&'a self) -> ListIter<'a, T> {
         ListIter { head: &self.head }
     }
@@ -90,8 +101,9 @@ impl<T> Debug for List<T> {
     }
 }
 
+/// Holds a reference to the current head that is used
 pub struct ListIterator<T> {
-    head: Option<Box<ListItem<T>>>,
+    head: Option<Arc<ListItem<T>>>,
 }
 
 impl<T> Iterator for ListIterator<T> {

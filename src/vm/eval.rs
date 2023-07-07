@@ -28,6 +28,8 @@ use super::{
     SharedContainer, Symbol,
 };
 
+/// Helper function to evaluate '() the form, resulting in a list of quoted
+/// forms of the values in the list of S-Expressions
 fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
     quotes
         .iter()
@@ -98,6 +100,8 @@ fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
         .collect::<List<_>>()
 }
 
+/// Evaluates backquotes, the `() form. Needs to be async so that it can call
+/// functions like eval_one to evaluate , and ,@ forms, both as a symbol and an expr
 #[async_recursion]
 async fn eval_backquotes<T: Clone + Send + Sync>(
     ctx: T,
@@ -201,6 +205,8 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
     Ok(results.into_iter().collect())
 }
 
+/// Helper function for the `quote` special form. Takes in the single expression
+/// and returns it in its quoted form, most useful for turning Exprs into Lists
 fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
     match expr {
         SExpression::Nil => Ok(LispValue::Nil),
@@ -270,6 +276,11 @@ fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
 const CURRENT_LAMBDA: AtomicU64 = AtomicU64::new(0);
 const CURRENT_UNNAMED_FUNC: AtomicU64 = AtomicU64::new(0);
 
+/// Special forms are special functions that do not evaluate their arguments,
+/// functioning closer to macros in that respect. This function returns an Option
+/// wrapped around an actual usable result because it lets Some represent the fact
+/// that a special form was called, whereas None means no special form was called
+/// and the evaluator should instead continue to look for a function to execute
 #[async_recursion]
 async fn dispatch_special_form<T: Clone + Send + Sync>(
     name: &str,
@@ -504,6 +515,8 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
     }
 }
 
+/// Internal function used to assist eval_one, specifically with regards to
+/// calling a function using an S-Expression of the form: `(func_name)`
 #[async_recursion]
 async fn execute_callable<T: Clone + Send + Sync>(
     callable: Callable<T>,
@@ -605,6 +618,15 @@ async fn execute_callable<T: Clone + Send + Sync>(
     }
 }
 
+/// Given an S-Expression, evaluates it to determine the intended
+/// result of the value provided
+///
+/// Takes a context that is passed to all functions of type NativeFunc
+/// and AsyncNativeFunc. It is clone as it is expected to be a smart
+/// pointer like Arc, but it can be a static or readonly pointer as well
+///
+/// The position provided is where in the file the source code is that
+/// resulted in the expression being evaluated
 #[async_recursion]
 pub async fn eval_one<T: Clone + Send + Sync>(
     ctx: T,
