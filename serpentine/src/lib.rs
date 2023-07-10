@@ -20,6 +20,33 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Debug)]
+pub enum SerpentineError {
+    Tokenize(tokenizer::TokenizerError),
+    Parse(parser::ParseError),
+    Runtime(vm::error::RuntimeError),
+}
+
+pub type SError = SerpentineError;
+
+impl From<tokenizer::TokenizerError> for SerpentineError {
+    fn from(e: tokenizer::TokenizerError) -> Self {
+        Self::Tokenize(e)
+    }
+}
+
+impl From<parser::ParseError> for SerpentineError {
+    fn from(e: parser::ParseError) -> Self {
+        Self::Parse(e)
+    }
+}
+
+impl From<vm::error::RuntimeError> for SerpentineError {
+    fn from(e: vm::error::RuntimeError) -> Self {
+        Self::Runtime(e)
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Position {
     line: usize,
@@ -59,6 +86,7 @@ impl Display for Position {
     }
 }
 
+#[macro_use]
 pub mod parser;
 pub mod tokenizer;
 pub mod vm;

@@ -39,19 +39,19 @@ fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
             SExpression::Float(f) => LispValue::Float(*f),
             SExpression::String(s) => s.into(),
             SExpression::Symbol(s) => LispValue::Symbol(s.into()),
-            SExpression::Expr(p, q) => LispValue::List(eval_quotes(&q)),
-            SExpression::Quote(p, q) => LispValue::List(
+            SExpression::Expr(_, q) => LispValue::List(eval_quotes(q)),
+            SExpression::Quote(_, q) => LispValue::List(
                 [
                     LispValue::Symbol("'".into()),
-                    LispValue::List(eval_quotes(&q)),
+                    LispValue::List(eval_quotes(q)),
                 ]
                 .into_iter()
                 .collect(),
             ),
-            SExpression::Backquote(p, q) => LispValue::List(
+            SExpression::Backquote(_, q) => LispValue::List(
                 [
                     LispValue::Symbol("`".into()),
-                    LispValue::List(eval_quotes(&q)),
+                    LispValue::List(eval_quotes(q)),
                 ]
                 .into_iter()
                 .collect(),
@@ -79,18 +79,18 @@ fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
                     .into_iter()
                     .collect(),
             ),
-            SExpression::UnquoteExpression(p, q) => LispValue::List(
+            SExpression::UnquoteExpression(_, q) => LispValue::List(
                 [
                     LispValue::Symbol(",".into()),
-                    LispValue::List(eval_quotes(&q)),
+                    LispValue::List(eval_quotes(q)),
                 ]
                 .into_iter()
                 .collect(),
             ),
-            SExpression::ListSpliceExpr(p, q) => LispValue::List(
+            SExpression::ListSpliceExpr(_, q) => LispValue::List(
                 [
                     LispValue::Symbol(",@".into()),
-                    LispValue::List(eval_quotes(&q)),
+                    LispValue::List(eval_quotes(q)),
                 ]
                 .into_iter()
                 .collect(),
@@ -125,24 +125,24 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
                 SExpression::Float(f) => ret_simple!(LispValue::Float(*f)),
                 SExpression::String(s) => ret_simple!(s.into()),
                 SExpression::Symbol(s) => ret_simple!(LispValue::Symbol(s.into())),
-                SExpression::Expr(p, q) => ret_simple!(LispValue::List(eval_quotes(&q))),
+                SExpression::Expr(_, q) => ret_simple!(LispValue::List(eval_quotes(q))),
                 SExpression::FuncSymbol(q) => ret_simple!(LispValue::List(
                     [LispValue::Symbol("#'".into()), LispValue::Symbol(q.into()),]
                         .into_iter()
                         .collect(),
                 )),
-                SExpression::Backquote(p, q) => ret_simple!(LispValue::List(
+                SExpression::Backquote(_, q) => ret_simple!(LispValue::List(
                     [
                         LispValue::Symbol("`".into()),
-                        LispValue::List(eval_quotes(&q)),
+                        LispValue::List(eval_quotes(q)),
                     ]
                     .into_iter()
                     .collect(),
                 )),
-                SExpression::Quote(p, q) => ret_simple!(LispValue::List(
+                SExpression::Quote(_, q) => ret_simple!(LispValue::List(
                     [
                         LispValue::Symbol("'".into()),
-                        LispValue::List(eval_quotes(&q)),
+                        LispValue::List(eval_quotes(q)),
                     ]
                     .into_iter()
                     .collect(),
@@ -160,7 +160,7 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
                     envi.find_variable(&(q.into()), pos)?
                         .ok_or(())
                         .map_err(envi.map_err_kind(
-                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(&q)),
+                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(q)),
                             Some(pos),
                         ))
                         .map(|r| vec![r])
@@ -170,12 +170,12 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
                     envi.find_variable(&(s.into()), pos)?
                         .ok_or(())
                         .map_err(envi.map_err_kind(
-                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(&s)),
+                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(s)),
                             Some(pos),
                         ))
                         .map(|r| match &*r {
                             LispValue::List(l) => l.iter().collect(),
-                            other => vec![Arc::clone(&r)],
+                            _ => vec![Arc::clone(&r)],
                         })
                 }
                 SExpression::UnquoteExpression(p, s) => eval_one(
@@ -195,7 +195,7 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
                 .await
                 .map(|r| match &*r {
                     LispValue::List(l) => l.iter().collect(),
-                    other => vec![r],
+                    _ => vec![r],
                 }),
             }?
             .into_iter(),
@@ -212,21 +212,21 @@ fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
         SExpression::Nil => Ok(LispValue::Nil),
         SExpression::Int(i) => Ok(LispValue::Int(*i)),
         SExpression::Float(f) => Ok(LispValue::Float(*f)),
-        SExpression::String(s) => Ok(LispValue::String(Arc::clone(&s))),
+        SExpression::String(s) => Ok(LispValue::String(Arc::clone(s))),
         SExpression::Symbol(s) => Ok(LispValue::Symbol(s.into())),
-        SExpression::Expr(p, q) => Ok(LispValue::List(eval_quotes(&q))),
-        SExpression::Quote(p, q) => Ok(LispValue::List(
+        SExpression::Expr(_, q) => Ok(LispValue::List(eval_quotes(q))),
+        SExpression::Quote(_, q) => Ok(LispValue::List(
             [
                 LispValue::Symbol("'".into()),
-                LispValue::List(eval_quotes(&q)),
+                LispValue::List(eval_quotes(q)),
             ]
             .into_iter()
             .collect(),
         )),
-        SExpression::Backquote(p, q) => Ok(LispValue::List(
+        SExpression::Backquote(_, q) => Ok(LispValue::List(
             [
                 LispValue::Symbol("`".into()),
-                LispValue::List(eval_quotes(&q)),
+                LispValue::List(eval_quotes(q)),
             ]
             .into_iter()
             .collect(),
@@ -254,18 +254,18 @@ fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
                 .into_iter()
                 .collect(),
         )),
-        SExpression::UnquoteExpression(p, q) => Ok(LispValue::List(
+        SExpression::UnquoteExpression(_, q) => Ok(LispValue::List(
             [
                 LispValue::Symbol(",".into()),
-                LispValue::List(eval_quotes(&q)),
+                LispValue::List(eval_quotes(q)),
             ]
             .into_iter()
             .collect(),
         )),
-        SExpression::ListSpliceExpr(p, q) => Ok(LispValue::List(
+        SExpression::ListSpliceExpr(_, q) => Ok(LispValue::List(
             [
                 LispValue::Symbol(",@".into()),
-                LispValue::List(eval_quotes(&q)),
+                LispValue::List(eval_quotes(q)),
             ]
             .into_iter()
             .collect(),
@@ -273,8 +273,8 @@ fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
     }
 }
 
-const CURRENT_LAMBDA: AtomicU64 = AtomicU64::new(0);
-const CURRENT_UNNAMED_FUNC: AtomicU64 = AtomicU64::new(0);
+static CURRENT_LAMBDA: AtomicU64 = AtomicU64::new(0);
+static CURRENT_UNNAMED_FUNC: AtomicU64 = AtomicU64::new(0);
 
 /// Special forms are special functions that do not evaluate their arguments,
 /// functioning closer to macros in that respect. This function returns an Option
@@ -287,7 +287,7 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
     ctx: T,
     pos: &Position,
     env: SharedContainer<Environment<T>>,
-    mut args: &[SExpression],
+    args: &[SExpression],
 ) -> Option<Result<Arc<LispValue<T>>, RuntimeError>> {
     macro_rules! tryy {
         ($val:expr) => {
@@ -377,8 +377,8 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
         "cond" => {
             for arg in args {
                 match arg {
-                    SExpression::Expr(p, e) => {
-                        if e.len() == 0 {
+                    SExpression::Expr(_, e) => {
+                        if e.is_empty() {
                             continue;
                         }
 
@@ -389,7 +389,7 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
                         let cond = tryy!(eval_one(ctx.clone(), pos, env.clone(), &e[0]).await);
 
                         if !matches!(*cond, LispValue::Nil) {
-                            return Some(eval_one(ctx, pos, env.clone(), &e.last().unwrap()).await);
+                            return Some(eval_one(ctx, pos, env.clone(), e.last().unwrap()).await);
                         }
                     }
                     other => throw_wta!("Expression", other.get_pretty_name()),
@@ -423,8 +423,8 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
             let name = symb!();
             let val = tryy!(eval_one(ctx.clone(), pos, env.clone(), &args[1]).await);
 
-            let mut envi = tryy!(Environment::get_env_mut(&env, &pos));
-            tryy!(envi.set_variable(name, Arc::clone(&val), &pos));
+            let mut envi = tryy!(Environment::get_env_mut(&env, pos));
+            tryy!(envi.set_variable(name, Arc::clone(&val), pos));
 
             Some(Ok(val))
         }
@@ -485,7 +485,7 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
             {
                 let global = tryy!(Environment::get_global(env.clone(), pos));
                 let mut envi = tryy!(Environment::get_env_mut(&global, pos));
-                envi.set_function(name.clone(), func.clone());
+                envi.set_function(name.clone(), func);
             }
 
             Some(Ok(Arc::new(LispValue::Symbol(name))))
@@ -495,7 +495,8 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
                 throw_wac!("lambda");
             }
 
-            let fname = format!("lambda-{}", CURRENT_LAMBDA.fetch_add(1, Ordering::Relaxed)).into();
+            let lambda_num = CURRENT_LAMBDA.fetch_add(1, Ordering::Relaxed);
+            let fname = format!("lambda-{}", lambda_num).into();
             let func = func!(fname, &args[0..], Func, Some(env.clone()));
 
             Some(Ok(Arc::new(LispValue::Callable(func))))
@@ -588,7 +589,7 @@ async fn execute_callable<T: Clone + Send + Sync>(
 
     match callable {
         Callable::NativeMacro(_, nm) => {
-            let new_code = nm.run((&ctx, pos), env.clone(), args.to_vec().clone())?;
+            let new_code = nm.run((&ctx, pos), env.clone(), args.to_vec())?;
             eval_one(ctx.clone(), pos, env, &new_code).await
         }
         Callable::NativeFunc(_, nf) => {
@@ -596,9 +597,7 @@ async fn execute_callable<T: Clone + Send + Sync>(
             nf.run((&ctx, pos), env, args)
         }
         Callable::AsyncNativeMacro(_, anm) => {
-            let new_code = anm
-                .run((&ctx, pos), env.clone(), args.to_vec().clone())
-                .await?;
+            let new_code = anm.run((&ctx, pos), env.clone(), args.to_vec()).await?;
             eval_one(ctx.clone(), pos, env, &new_code).await
         }
         Callable::AsyncNativeFunc(_, anf) => {
@@ -645,7 +644,7 @@ pub async fn eval_one<T: Clone + Send + Sync>(
             envi.find_variable(&(s.into()), pos)?
                 .ok_or(())
                 .map_err(envi.map_err_kind(
-                    |_| RuntimeErrorKind::VariableAccess(Arc::clone(&s)),
+                    |_| RuntimeErrorKind::VariableAccess(Arc::clone(s)),
                     Some(pos),
                 ))
         }
@@ -654,23 +653,23 @@ pub async fn eval_one<T: Clone + Send + Sync>(
             envi.find_function(&(s.into()), pos)?
                 .ok_or(())
                 .map_err(envi.map_err_kind(
-                    |_| RuntimeErrorKind::VariableAccess(Arc::clone(&s)),
+                    |_| RuntimeErrorKind::VariableAccess(Arc::clone(s)),
                     Some(pos),
                 ))
                 .map(LispValue::Callable)
                 .map(Arc::new)
         }
-        SExpression::Quote(pos, exps) => Ok(Arc::new(LispValue::List(eval_quotes(exps)))),
+        SExpression::Quote(_, exps) => Ok(Arc::new(LispValue::List(eval_quotes(exps)))),
         SExpression::Backquote(pos, exps) => eval_backquotes(ctx, pos, env, exps)
             .await
             .map(LispValue::List)
             .map(Arc::new),
-        SExpression::Expr(pos, exps) if exps.len() == 0 => Ok(Arc::new(LispValue::Nil)),
+        SExpression::Expr(_, exps) if exps.is_empty() => Ok(Arc::new(LispValue::Nil)),
         SExpression::Expr(pos, exps) => {
             let fname = match &exps[0] {
                 SExpression::Symbol(fname) => Ok(fname.clone()),
                 notfname => {
-                    let envi = Environment::get_env(&env, &pos)?;
+                    let envi = Environment::get_env(&env, pos)?;
                     Err(RuntimeError::new(
                         RuntimeErrorKind::InvalidFunction(notfname.clone()),
                         envi.get_environment_name(pos)?,
@@ -713,7 +712,7 @@ mod test {
 
     use crate::{
         parser, tokenizer,
-        vm::{self, EnvironmentBuilder, LispValue, List, Symbol},
+        vm::{EnvironmentBuilder, LispValue},
         Position,
     };
 
@@ -747,7 +746,7 @@ mod test {
                     };
                     let parsed = parsed.remove(0);
 
-                    let mut environment = Arc::new(RwLock::new(
+                    let environment = Arc::new(RwLock::new(
                         EnvironmentBuilder::new(name, position.clone()).build(),
                     ));
 
@@ -768,7 +767,7 @@ mod test {
                                     .expect("could not get environment to set variable");
                                 envi.set_function(stringify!($name).into(), c.clone());
                             }
-                            val => {
+                            _ => {
                                 let mut envi = Environment::get_env_mut(&$env, &$pos)
                                     .expect("could not get environment to set variable");
                                 envi.set_variable(stringify!($name).into(), Arc::from(var), &$pos)
@@ -787,15 +786,6 @@ mod test {
         };
         ($expr:expr, $($err:ident)?) => {
             $expr.expect("could not evaluate input lisp")
-        };
-    }
-
-    macro_rules! handle_err_type {
-        (err) => {
-            Result<Arc<LispValue<()>>, RuntimeError>
-        };
-        ($($err:ident)?) => {
-            Arc<LispValue<()>>
         };
     }
 
@@ -844,7 +834,7 @@ mod test {
                 let $pos_name = Position { file: "<test>".into(), line: 1, col: 0 };
                 let parsed = parsed.remove(0);
 
-                let mut $env_name = Arc::new(RwLock::new(EnvironmentBuilder::new("<test>", $pos_name.clone()).build()));
+                let $env_name = Arc::new(RwLock::new(EnvironmentBuilder::new("<test>", $pos_name.clone()).build()));
 
                 $(add_env_value!($ctx, $env_name, $var_name, $var_value, $pos_name);)*
 
@@ -876,7 +866,7 @@ mod test {
 
         match_next!(items, LispValue::Symbol(_));
         match_next!(items, LispValue::Int(1));
-        match_next!(items, LispValue::Float(2.3));
+        match_next!(items, LispValue::Float(_));
         match_next!(items, LispValue::String(_));
         match_next!(items, LispValue::Nil);
     });
@@ -908,8 +898,8 @@ mod test {
         let mut items = items.iter();
 
         match_next!(items, LispValue::Symbol(_));
-        match_next!(items, LispValue::Float(3.14));
-        match_next!(items, LispValue::Float(3.14));
+        match_next!(items, LispValue::Float(_));
+        match_next!(items, LispValue::Float(_));
         match_next!(items, LispValue::Int(1));
         match_next!(items, LispValue::Int(2));
         match_next!(items, LispValue::Int(3));

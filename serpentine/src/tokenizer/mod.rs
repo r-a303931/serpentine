@@ -138,10 +138,10 @@ pub fn tokenize(input: &InputFile) -> Result<Vec<Token<'_>>, TokenizerError> {
         };
     }
 
-    while let Some(first_char) = content_ptr.get(0) {
+    while let Some(first_char) = content_ptr.first() {
         match first_char {
             ';' => {
-                while let Some(first_char) = content_ptr.get(0) {
+                while let Some(first_char) = content_ptr.first() {
                     if *first_char == '\n' {
                         break;
                     }

@@ -149,7 +149,7 @@ pub fn add_frame<'a>(
 ) -> impl Fn(RuntimeError) -> RuntimeError + 'a {
     |mut e| {
         e.stack_trace
-            .push(StackTraceFrame::new(frame_name.clone().into(), pos.clone()));
+            .push(StackTraceFrame::new(frame_name.clone(), pos.clone()));
         e
     }
 }

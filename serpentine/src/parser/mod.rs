@@ -20,12 +20,31 @@ use crate::{
     Position,
 };
 
+/// Represents an error that can crop up when parsing Serpentine programs
 #[derive(Debug)]
 pub struct ParseError {
     position: Position,
     message: String,
 }
 
+impl ParseError {
+    /// Retrieve the position of the parse error
+    pub fn position(&self) -> &Position {
+        &self.position
+    }
+
+    /// Retrieve a user facing message for the parse error
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// Represents a borrowed [`SExpression`], where all the actual
+/// character data is held by the struct holding file data
+///
+/// The exception is [`SExpr::String`], as it holds parsed
+/// character data to include things such as newline characters
+/// and escaped quotes
 #[derive(Debug, PartialEq)]
 pub enum SExpr<'a> {
     Nil,
@@ -44,6 +63,10 @@ pub enum SExpr<'a> {
     ListSpliceExpr(Position, Vec<SExpr<'a>>),
 }
 
+/// Represents an owned S-Expression
+///
+/// `Arc<str>` is used instead of [`String`], as this is a data type that
+/// needs to be cloned frequently and is immutable
 #[derive(Debug, PartialEq, Clone)]
 pub enum SExpression {
     Nil,
@@ -64,7 +87,7 @@ pub enum SExpression {
 
 impl From<Arc<str>> for SExpression {
     fn from(s: Arc<str>) -> Self {
-        Self::String(s.into())
+        Self::String(s)
     }
 }
 
@@ -87,6 +110,7 @@ impl From<i64> for SExpression {
 }
 
 impl SExpression {
+    /// Debugging function used to help generate parse errors
     pub fn get_pretty_name(&self) -> &'static str {
         match self {
             Self::Nil => "Nil",
@@ -106,12 +130,14 @@ impl SExpression {
         }
     }
 
-    pub fn serialize(&self, pretty: bool) -> String {
+    /// Allows for serializing S-Expressions back to plaintext, allowing
+    /// for transfering, saving, debugging, etc
+    pub fn serialize(&self, _pretty: bool) -> String {
         todo!()
     }
 }
 
-fn owned<'a>(expr: SExpr<'a>) -> SExpression {
+fn owned(expr: SExpr<'_>) -> SExpression {
     match expr {
         SExpr::Nil => SExpression::Nil,
         SExpr::Symbol(s) => SExpression::Symbol(Arc::from(s.iter().collect::<String>())),
@@ -144,6 +170,15 @@ impl<'a> From<SExpr<'a>> for SExpression {
     }
 }
 
+/// Takes a list of tokens, and parses the next SExpr, returning unparsed tokens
+///
+/// If there is an unexpected EOF, it is not detected unless it is a part of the
+/// S-Expression being parsed
+///
+/// ### Panics
+///
+/// This function assumes the presence of tokens, and will panic if the slice of
+/// Tokens is empty
 pub fn parse_next<'a, 'b>(
     mut tokens: &'b [Token<'a>],
 ) -> Result<(SExpr<'a>, &'b [Token<'a>]), ParseError> {
@@ -211,6 +246,24 @@ pub fn parse_next<'a, 'b>(
     }
 }
 
+/// Parses all of the provided tokens, returning parsed out S-Expressions.
+///
+/// In the case of an empty slice of Tokens, this returns an empty Vec
+///
+/// # Examples
+///
+/// ```
+/// # use serpentine::{SError, parser::{parse, SExpr}, tokenizer::{InputFile, tokenize}};
+/// # fn main() -> Result<(), SError> {
+/// let input = InputFile { name: "<test>".to_string(), contents: "3 \"a\\\"sdf\"".chars().collect() };
+/// let tokens = tokenize(&input)?;
+/// let parsed = parse(&tokens)?;
+///
+/// assert_eq!(parsed[0], SExpr::Int(3));
+/// assert_eq!(parsed[1], SExpr::String("a\"sdf".into()));
+/// #   Ok(())
+/// # }
+/// ```
 pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<Vec<SExpr<'a>>, ParseError> {
     if tokens.is_empty() {
         return Ok(vec![]);
@@ -225,55 +278,77 @@ pub fn parse<'a>(tokens: &[Token<'a>]) -> Result<Vec<SExpr<'a>>, ParseError> {
         tokens_left = rest;
     }
 
-    return Ok(exprs);
+    Ok(exprs)
 }
 
+/// Allows for constructing SExpression structs
+///
+/// # Examples
+///
+/// ```
+/// # use serpentine::lisp_lit;
+/// # use serpentine::parser::SExpression;
+/// serpentine::lisp_lit!(()); // SExpression::Nil
+/// serpentine::lisp_lit!((quote ([1] [2] [3])));
+/// // equivalent to:
+/// // SExpression::Quote(<position>, vec![
+/// //     1.into(),
+/// //     2.into(),
+/// //     3.into()
+/// // ])
+/// serpentine::lisp_lit!(((sym "add-1") {SExpression::Int(1)}));
+/// // equivalent to:
+/// // SExpression::Expr(<position>, vec![
+/// //     SExpression::Symbol("add-1".into()),
+/// //     SExpression::Int(1)
+/// // ])
+/// ```
 #[macro_export]
 macro_rules! lisp_lit {
     ({$p:expr}; ()) => {
-        SExpression::Nil
+        $crate::parser::SExpression::Nil
     };
     ({$p:expr}; (quote ($($body:tt)*))) => {
-        SExpression::Quote($p.clone(), [
+        $crate::parser::SExpression::Quote($p.clone(), [
             $(lisp_lit!({$p}; $body),)*
         ].to_vec())
     };
     ({$p:expr}; (quote $name:expr)) => {
-        SExpression::QuoteSymbol($name.into())
+        $crate::parser::SExpression::QuoteSymbol($name.into())
     };
     ({$p:expr}; [$val:expr]) => {
         $val.into()
     };
     ({$p:expr}; (sym $val:expr)) => {
-        SExpression::Symbol($val.into())
+        $crate::parser::SExpression::Symbol($val.into())
     };
     ({$p:expr}; {$val:expr}) => {
         $val
     };
     ({$p:expr}; ,@($($body:tt)*)) => {
-        SExpression::ListSpliceExpr($p.clone(), [
+        $crate::parser::SExpression::ListSpliceExpr($p.clone(), [
             $(lisp_lit!({$p}; $body),)*
         ].to_vec())
     };
     ({$p:expr}; ,@$name:expr) => {
-        SExpression::ListSpliceSymbol($name.into())
+        $crate::parser::SExpression::ListSpliceSymbol($name.into())
     };
     ({$p:expr}; ,($($body:tt)*)) => {
-        SExpression::UnquoteExpression($p.clone(), [
+        $crate::parser::SExpression::UnquoteExpression($p.clone(), [
             $(lisp_lit!({$p}; $body),)*
         ].to_vec())
     };
     ({$p:expr}; ,$name:expr) => {
-        SExpression::UnquoteSymbol($name.into())
+        $crate::parser::SExpression::UnquoteSymbol($name.into())
     };
     ({$p:expr}; ($($body:tt)*)) => {
-        SExpression::Expr($p.clone(), [
+        $crate::parser::SExpression::Expr($p.clone(), [
             $(lisp_lit!({$p}; $body),)*
         ].to_vec())
     };
     ($($body:tt)*) => {{
-        let position = $crate::Position::new("<lisplit>", 1, 0);
-        lisp_lit!({position}; $($body)*)
+        let _position = $crate::Position::new("<lisplit>", 1, 0);
+        lisp_lit!({_position}; $($body)*)
     }};
 }
 

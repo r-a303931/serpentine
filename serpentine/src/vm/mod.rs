@@ -148,7 +148,7 @@ impl From<Arc<str>> for Symbol {
 
 impl From<&Arc<str>> for Symbol {
     fn from(s: &Arc<str>) -> Self {
-        Symbol(Arc::clone(&s))
+        Symbol(Arc::clone(s))
     }
 }
 
@@ -272,7 +272,7 @@ impl<T> LispValue<T> {
             LispValue::Symbol(s) => SExpression::Symbol(Arc::clone(&s.0)),
             LispValue::Int(i) => SExpression::Int(*i),
             LispValue::Float(f) => SExpression::Float(*f),
-            LispValue::String(s) => SExpression::String(Arc::clone(&s)),
+            LispValue::String(s) => SExpression::String(Arc::clone(s)),
             LispValue::List(l) => {
                 if quoted {
                     SExpression::Expr(
@@ -291,10 +291,9 @@ impl<T> LispValue<T> {
                 }
             }
             LispValue::Callable(c) => match c {
-                Callable::NativeFunc(n, _) => SExpression::FuncSymbol((*n).into()),
-                Callable::AsyncNativeFunc(n, _) => SExpression::FuncSymbol((*n).into()),
-                Callable::NativeMacro(n, _) => SExpression::FuncSymbol((*n).into()),
-                Callable::AsyncNativeMacro(n, _) => None?,
+                Callable::NativeFunc(n, _) | Callable::AsyncNativeFunc(n, _) => {
+                    SExpression::Expr(p.clone(), [SExpression::Symbol((*n).into())].to_vec())
+                }
                 Callable::Func(f) if f.env.is_none() => SExpression::Expr(
                     p.clone(),
                     [
@@ -309,12 +308,13 @@ impl<T> LispValue<T> {
                 ),
                 Callable::Func(_) => None?,
                 Callable::Macro(_) => None?,
+                Callable::NativeMacro(..) | Callable::AsyncNativeMacro(..) => None?,
             },
             LispValue::Error(err) => lisp_lit! {
                 {p};
                 ((sym "error")
                  {match err.kind() {
-                     RuntimeErrorKind::InvalidArgument(n) => None?,
+                     RuntimeErrorKind::InvalidArgument(_) => None?,
                      _ => None?
                  }}
                  {SExpression::Expr(
@@ -543,7 +543,7 @@ impl<'a, T: 'a> Environment<T> {
         pos: &Position,
     ) -> Result<RwLockReadGuard<'a, Environment<T>>, RuntimeError> {
         lock.read()
-            .map_err(convert_to_error(&"<internal: get_env>", &pos))
+            .map_err(convert_to_error(&"<internal: get_env>", pos))
     }
 
     pub fn get_env_mut(
@@ -551,7 +551,7 @@ impl<'a, T: 'a> Environment<T> {
         pos: &Position,
     ) -> Result<RwLockWriteGuard<'a, Environment<T>>, RuntimeError> {
         lock.write()
-            .map_err(convert_to_error(&"<internal: get_env>", &pos))
+            .map_err(convert_to_error(&"<internal: get_env>", pos))
     }
 
     pub fn get_global(
@@ -615,7 +615,7 @@ impl<T> Environment<T> {
         arg_name: &Symbol,
         call_position: &Position,
     ) -> Result<Option<Arc<LispValue<T>>>, RuntimeError> {
-        let frame_name = self.get_environment_name(&call_position)?;
+        let frame_name = self.get_environment_name(call_position)?;
         self.find_variable_internal(arg_name, &frame_name, call_position)
     }
 
@@ -652,7 +652,7 @@ impl<T> Environment<T> {
         arg_name: &Symbol,
         call_position: &Position,
     ) -> Result<Option<Callable<T>>, RuntimeError> {
-        let frame_name = self.get_environment_name(&call_position)?;
+        let frame_name = self.get_environment_name(call_position)?;
         self.find_function_internal(arg_name, &frame_name, call_position)
     }
 
@@ -661,7 +661,7 @@ impl<T> Environment<T> {
             (Some(name), _) => Ok(name.clone()),
             (_, Some(parent)) => parent
                 .read()
-                .map_err(convert_to_error(&"<internal: get_environment_name>", &pos))?
+                .map_err(convert_to_error(&"<internal: get_environment_name>", pos))?
                 .get_environment_name(pos),
             _ => Ok("*global*".into()),
         }
@@ -726,11 +726,13 @@ impl<T> Environment<T> {
         call_position: &Position,
     ) -> Result<bool, RuntimeError> {
         if let Some(var) = self.variables.get(name) {
-            let var_int =
+            let mut var_int =
                 var.write()
                     .map_err(man_convert_to_err(frame_name, call_position, &|_| {
                         error::RuntimeErrorKind::SetVariableAccess(name.0.to_owned())
                     }))?;
+
+            *var_int = Arc::clone(value);
 
             Ok(true)
         } else if let Some(parent) = &self.parent {
@@ -753,7 +755,7 @@ impl<T> Environment<T> {
         value: Arc<LispValue<T>>,
         call_position: &Position,
     ) -> Result<(), RuntimeError> {
-        let frame_name = self.get_environment_name(&call_position)?;
+        let frame_name = self.get_environment_name(call_position)?;
 
         if !self.set_variable_internal(&name, &value, &frame_name, call_position)? {
             self.variables.insert(name, RwLock::new(value));
@@ -781,22 +783,22 @@ pub enum VmSExpr<'a> {
     ListSpliceExpr(&'a [SExpression]),
 }
 
-pub fn as_matcher<'a>(sexpr: &'a SExpression) -> VmSExpr<'a> {
+pub fn as_matcher(sexpr: &SExpression) -> VmSExpr<'_> {
     match sexpr {
         SExpression::Nil => VmSExpr::Nil,
-        SExpression::Symbol(s) => VmSExpr::Symbol(&*s),
+        SExpression::Symbol(s) => VmSExpr::Symbol(s),
         SExpression::Int(i) => VmSExpr::Int(*i),
         SExpression::Float(f) => VmSExpr::Float(*f),
-        SExpression::FuncSymbol(f) => VmSExpr::FuncSymbol(&*f),
-        SExpression::String(s) => VmSExpr::String(&*s),
-        SExpression::QuoteSymbol(s) => VmSExpr::QuoteSymbol(&*s),
-        SExpression::UnquoteSymbol(s) => VmSExpr::UnquoteSymbol(&*s),
-        SExpression::ListSpliceSymbol(s) => VmSExpr::ListSpliceSymbol(&*s),
-        SExpression::Expr(_, e) => VmSExpr::Expr(&*e),
-        SExpression::Quote(_, e) => VmSExpr::Quote(&*e),
-        SExpression::Backquote(_, e) => VmSExpr::Backquote(&*e),
-        SExpression::UnquoteExpression(_, e) => VmSExpr::UnquoteExpression(&*e),
-        SExpression::ListSpliceExpr(_, e) => VmSExpr::ListSpliceExpr(&*e),
+        SExpression::FuncSymbol(f) => VmSExpr::FuncSymbol(f),
+        SExpression::String(s) => VmSExpr::String(s),
+        SExpression::QuoteSymbol(s) => VmSExpr::QuoteSymbol(s),
+        SExpression::UnquoteSymbol(s) => VmSExpr::UnquoteSymbol(s),
+        SExpression::ListSpliceSymbol(s) => VmSExpr::ListSpliceSymbol(s),
+        SExpression::Expr(_, e) => VmSExpr::Expr(e),
+        SExpression::Quote(_, e) => VmSExpr::Quote(e),
+        SExpression::Backquote(_, e) => VmSExpr::Backquote(e),
+        SExpression::UnquoteExpression(_, e) => VmSExpr::UnquoteExpression(e),
+        SExpression::ListSpliceExpr(_, e) => VmSExpr::ListSpliceExpr(e),
     }
 }
 
