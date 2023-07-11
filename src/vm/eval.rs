@@ -513,6 +513,8 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
                 Err(e) => Some(Ok(Arc::new(LispValue::Error(e)))),
             }
         }
+        "defmodule" => None,
+        "include" => None,
         // "error" => None,
         _ => None,
     }

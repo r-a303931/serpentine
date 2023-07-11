@@ -627,7 +627,13 @@ impl<T> Environment<T> {
         frame_name: &Arc<str>,
         call_position: &Position,
     ) -> Result<Option<Callable<T>>, RuntimeError> {
-        if let Some(var) = self.functions.get(arg_name) {
+        if let Some((mod_name, fn_name)) = arg_name.0.split_once("::") {
+            if let Some(module) = self.modules.get(&Symbol(mod_name.into())) {
+                module.find_function_internal(&Symbol(fn_name.into()), frame_name, call_position)
+            } else {
+                Ok(None)
+            }
+        } else if let Some(var) = self.functions.get(arg_name) {
             let var_int =
                 var.read()
                     .map_err(man_convert_to_err(frame_name, call_position, &|_| {

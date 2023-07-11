@@ -1,5 +1,18 @@
 [package]
+name = "serpentine"
+version = "0.1.0"
+edition = "2021"
 license-file = "LICENSE"
+authors = ["Andrew Rioux <rioux.d.andrew@gmail.com>"]
+description = "A green Lisp implementation in Rust"
+repository = "https://github.com/r-a303931/serpentine"
+
+[dependencies]
+async-trait = { version = "0.1.60" }
+tokio = { version = "1.23.0", features = ["time", "fs", "net", "rt", "macros"]   }
+serpentine-macro = { path = "./serpentine-macro" }
+futures = "0.3.25"
+async-recursion = "1.0.0"
 
 [workspace]
-members = ["serpentine", "serpentine-macro"]
+members = ["serpentine-macro"]
