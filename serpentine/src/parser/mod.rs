@@ -1,17 +1,19 @@
+// parser/mod.rs: provides parsing functions that convert tokens to s-expressions
 // Copyright (C) 2023 Andrew Rioux
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; either version 2
+// of the License, or (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Affero General Public License for more details.
+// GNU General Public License for more details.
 //
-// You should have received a copy of the GNU Affero General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License
+// along with this program; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 use std::sync::Arc;
 
@@ -393,7 +395,10 @@ mod test {
 
         let parsed = parse_next(&asdf).expect("could not parse the input provided");
 
-        let SExpr::Expr(_, elems) = parsed.0 else { dbg!(parsed); panic!("output did not match expected"); };
+        let SExpr::Expr(_, elems) = parsed.0 else {
+            dbg!(parsed);
+            panic!("output did not match expected");
+        };
         assert_matches!(elems[..], [SExpr::Symbol(ASDF)]);
     }
 
@@ -404,7 +409,10 @@ mod test {
 
         let parsed = parse_next(&source2).expect("could not parse the input provided");
 
-        let SExpr::Expr(_, elems) = parsed.0 else { dbg!(parsed); panic!("output did not match expected"); };
+        let SExpr::Expr(_, elems) = parsed.0 else {
+            dbg!(parsed);
+            panic!("output did not match expected");
+        };
         assert_matches!(elems[0], SExpr::Quote(_, _));
     }
 
@@ -425,8 +433,12 @@ mod test {
         let source = TestSource::new("\"string \\\" 1\" \"string 2\\n\"");
         let source2 = source.tokenize();
 
-        let Ok((SExpr::String(parsed), source3)) = parse_next(&source2) else { panic!("could not parse item 1"); };
-        let Ok((SExpr::String(parsed2), _)) = parse_next(&source3) else { panic!("could not parse item 2"); };
+        let Ok((SExpr::String(parsed), source3)) = parse_next(&source2) else {
+            panic!("could not parse item 1");
+        };
+        let Ok((SExpr::String(parsed2), _)) = parse_next(&source3) else {
+            panic!("could not parse item 2");
+        };
 
         assert_eq!(&*parsed, "string \" 1");
         assert_eq!(&*parsed2, "string 2\n");
@@ -449,7 +461,9 @@ mod test {
 
     #[test]
     fn lisp_lit_basic_expr() {
-        let SExpression::Expr(_, v) = lisp_lit!{ ([1] [2] ["test"]) } else { panic!("could not create expression"); };
+        let SExpression::Expr(_, v) = lisp_lit! { ([1] [2] ["test"]) } else {
+            panic!("could not create expression");
+        };
 
         assert_eq!(
             v,
@@ -471,7 +485,9 @@ mod test {
 
     #[test]
     fn lisp_lit_quote_expr() {
-        let SExpression::Quote(_, v) = lisp_lit!{ (quote ([1] [2] ["test"])) } else { panic!("could not create expression"); };
+        let SExpression::Quote(_, v) = lisp_lit! { (quote ([1] [2] ["test"])) } else {
+            panic!("could not create expression");
+        };
         assert_eq!(
             v,
             vec![
@@ -484,7 +500,9 @@ mod test {
 
     #[test]
     fn lisp_lit_unquote() {
-        let SExpression::UnquoteExpression(_, v) = lisp_lit!{ ,([1] [2] ["test"]) } else { panic!("could not create expression"); };
+        let SExpression::UnquoteExpression(_, v) = lisp_lit! { ,([1] [2] ["test"]) } else {
+            panic!("could not create expression");
+        };
         assert_eq!(
             v,
             vec![
@@ -502,7 +520,9 @@ mod test {
 
     #[test]
     fn lisp_lit_splice() {
-        let SExpression::ListSpliceExpr(_, v) = lisp_lit!{ ,@([1] [2] ["test"]) } else { panic!("could not create expression"); };
+        let SExpression::ListSpliceExpr(_, v) = lisp_lit! { ,@([1] [2] ["test"]) } else {
+            panic!("could not create expression");
+        };
         assert_eq!(
             v,
             vec![

@@ -1,2 +1,5 @@
+[package]
+license-file = "LICENSE"
+
 [workspace]
 members = ["serpentine", "serpentine-macro"]
