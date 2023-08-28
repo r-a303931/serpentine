@@ -20,16 +20,78 @@ use std::{
     fmt::{self, Debug},
     hash::Hash,
     iter::{FromIterator, IntoIterator},
-    path::PathBuf,
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use crate::{lisp_lit, parser::SExpression, Position};
+use async_trait::async_trait;
 
+use crate::{lisp_lit, parser::SExpression, Position, PositionSource};
+
+pub mod context;
 pub mod error;
 pub mod eval;
 
+use context::VmContext;
 use error::{convert_to_error, man_convert_to_err, RuntimeError, RuntimeErrorKind};
+
+/// A wrapper around Position to add extra information to provide a consistent way
+/// of handling position information that is used in diagnostics info
+pub struct PositionContext {
+    position: Position,
+    frame_name: Arc<str>,
+    current_file: Option<PathBuf>,
+    previous_context: Option<Arc<PositionContext>>,
+}
+
+impl PositionContext {
+    pub fn push_frame(
+        self: &Arc<Self>,
+        position: Position,
+        frame_name: Arc<str>,
+        current_file: Option<PathBuf>,
+    ) -> PositionContext {
+        PositionContext {
+            position,
+            frame_name,
+            current_file,
+            previous_context: Some(Arc::clone(&self)),
+        }
+    }
+
+    pub fn new(
+        position: Position,
+        frame_name: Arc<str>,
+        current_file: Option<PathBuf>,
+    ) -> PositionContext {
+        PositionContext {
+            position,
+            frame_name,
+            current_file,
+            previous_context: None,
+        }
+    }
+
+    pub fn pop_frame(self) -> Option<Arc<PositionContext>> {
+        self.previous_context
+    }
+
+    pub fn position(&self) -> &Position {
+        &self.position
+    }
+
+    pub fn frame_name(&self) -> &str {
+        &self.frame_name
+    }
+
+    pub fn current_file(&self) -> Option<&Path> {
+        self.current_file.as_deref()
+    }
+
+    pub fn previous_context(&self) -> Option<&PositionContext> {
+        self.previous_context.as_deref()
+    }
+}
 
 /// Alias for the type of container used to share environments between different
 /// executions of lisp functions
@@ -43,27 +105,41 @@ pub type MutVarRef<T> = RwLock<Arc<LispValue<T>>>;
 pub type MutFuncRef<T> = RwLock<Callable<T>>;
 
 /// Represents the List data structure in the Lisp environment
-pub struct List<T> {
+pub struct List<T: VmContext> {
     head: Option<Arc<ListItem<T>>>,
 }
 
 /// Holds the reference to an item in the lisp list, as well as potentially to the
 /// rest of the list
-pub struct ListItem<T> {
+pub struct ListItem<T: VmContext> {
     cons: Arc<LispValue<T>>,
     cdr: Option<Arc<ListItem<T>>>,
 }
 
-impl<T> List<T> {
+impl<T: VmContext> List<T> {
     /// Converts a List into an Iterator with shared references
     pub fn iter(&self) -> ListIter<T> {
         ListIter {
             head: self.head.clone(),
         }
     }
+
+    pub fn cons(&self) -> Arc<LispValue<T>> {
+        self.head
+            .as_ref()
+            .map(|x| &x.cons)
+            .map(Arc::clone)
+            .unwrap_or_default()
+    }
+
+    pub fn cdr(&self) -> Option<List<T>> {
+        self.head.as_ref().map(|li| li.cdr.as_ref()).map(|li| List {
+            head: li.map(Arc::clone),
+        })
+    }
 }
 
-impl<T, In: Into<Arc<LispValue<T>>>> FromIterator<In> for List<T> {
+impl<T: VmContext, In: Into<Arc<LispValue<T>>>> FromIterator<In> for List<T> {
     fn from_iter<I: IntoIterator<Item = In>>(iter: I) -> Self {
         let mut item_stack = iter.into_iter().collect::<Vec<_>>();
 
@@ -80,17 +156,17 @@ impl<T, In: Into<Arc<LispValue<T>>>> FromIterator<In> for List<T> {
     }
 }
 
-impl<T> Debug for List<T> {
+impl<T: VmContext> Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-pub struct ListIter<T> {
+pub struct ListIter<T: VmContext> {
     head: Option<Arc<ListItem<T>>>,
 }
 
-impl<T> Iterator for ListIter<T> {
+impl<T: VmContext> Iterator for ListIter<T> {
     type Item = Arc<LispValue<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -105,7 +181,7 @@ impl<T> Iterator for ListIter<T> {
     }
 }
 
-pub struct LispFunc<T> {
+pub struct LispFunc<T: VmContext> {
     name: Symbol,
     env: Option<SharedContainer<Environment<T>>>,
     args: Vec<SExpression>,
@@ -114,7 +190,7 @@ pub struct LispFunc<T> {
     body: Vec<SExpression>,
 }
 
-impl<T> Clone for LispFunc<T> {
+impl<T: VmContext> Clone for LispFunc<T> {
     fn clone(&self) -> Self {
         LispFunc {
             name: self.name.clone(),
@@ -129,6 +205,12 @@ impl<T> Clone for LispFunc<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Symbol(Arc<str>);
+
+impl std::borrow::Borrow<str> for Symbol {
+    fn borrow(&self) -> &str {
+        self.0.borrow()
+    }
+}
 
 impl From<&str> for Symbol {
     fn from(s: &str) -> Self {
@@ -154,10 +236,10 @@ impl From<&Arc<str>> for Symbol {
     }
 }
 
-pub trait LispNativeMacro<T>: Debug {
+pub trait LispNativeMacro<T: VmContext>: Debug {
     fn run(
         &self,
-        ctx: (&T, &Position),
+        ctx: (&Arc<Mutex<T>>, &Position),
         env: SharedContainer<Environment<T>>,
         args: Vec<SExpression>,
     ) -> Result<SExpression, RuntimeError>;
@@ -165,10 +247,10 @@ pub trait LispNativeMacro<T>: Debug {
     fn docs(&self) -> Option<Arc<str>>;
 }
 
-pub trait LispNativeFunc<T>: Debug {
+pub trait LispNativeFunc<T: VmContext>: Debug {
     fn run(
         &self,
-        ctx: (&T, &Position),
+        ctx: (&Arc<Mutex<T>>, &Position),
         env: SharedContainer<Environment<T>>,
         args: Vec<Arc<LispValue<T>>>,
     ) -> Result<Arc<LispValue<T>>, RuntimeError>;
@@ -176,11 +258,11 @@ pub trait LispNativeFunc<T>: Debug {
     fn docs(&self) -> Option<Arc<str>>;
 }
 
-#[async_trait::async_trait]
-pub trait LispAsyncNativeMacro<T>: Debug {
+#[async_trait]
+pub trait LispAsyncNativeMacro<T: VmContext>: Debug {
     async fn run(
         &self,
-        ctx: (&T, &Position),
+        ctx: (&Arc<Mutex<T>>, &Position),
         env: SharedContainer<Environment<T>>,
         args: Vec<SExpression>,
     ) -> Result<SExpression, RuntimeError>;
@@ -188,11 +270,11 @@ pub trait LispAsyncNativeMacro<T>: Debug {
     fn docs(&self) -> Option<Arc<str>>;
 }
 
-#[async_trait::async_trait]
-pub trait LispAsyncNativeFunc<T>: Debug {
+#[async_trait]
+pub trait LispAsyncNativeFunc<T: VmContext>: Debug {
     async fn run(
         &self,
-        ctx: (&T, &Position),
+        ctx: (&Arc<Mutex<T>>, &Position),
         env: SharedContainer<Environment<T>>,
         args: Vec<Arc<LispValue<T>>>,
     ) -> Result<Arc<LispValue<T>>, RuntimeError>;
@@ -200,7 +282,7 @@ pub trait LispAsyncNativeFunc<T>: Debug {
     fn docs(&self) -> Option<Arc<str>>;
 }
 
-pub enum Callable<T> {
+pub enum Callable<T: VmContext> {
     Macro(Arc<LispFunc<T>>),
     Func(Arc<LispFunc<T>>),
     NativeFunc(&'static str, Arc<dyn LispNativeFunc<T> + Send + Sync>),
@@ -209,7 +291,7 @@ pub enum Callable<T> {
     AsyncNativeMacro(&'static str, Arc<dyn LispAsyncNativeMacro<T> + Send + Sync>),
 }
 
-impl<T> Clone for Callable<T> {
+impl<T: VmContext> Clone for Callable<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Macro(f) => Self::Macro(Arc::clone(f)),
@@ -222,17 +304,18 @@ impl<T> Clone for Callable<T> {
     }
 }
 
-impl<T> Callable<T> {
+impl<T: VmContext> Callable<T> {
     pub fn is_macro(&self) -> bool {
-        matches!(&self, Callable::Macro(_))
-            || matches!(&self, Callable::NativeMacro(..))
-            || matches!(&self, Callable::AsyncNativeMacro(..))
+        matches!(
+            &self,
+            Callable::Macro(..) | Callable::NativeMacro(..) | Callable::AsyncNativeMacro(..)
+        )
     }
 }
 
 pub trait ForeignObject: std::any::Any + Debug {}
 
-pub enum LispValue<T> {
+pub enum LispValue<T: VmContext> {
     Nil,
     Symbol(Symbol),
     Int(i64),
@@ -244,7 +327,13 @@ pub enum LispValue<T> {
     Foreign(Box<dyn ForeignObject + Send + Sync>),
 }
 
-impl<T> LispValue<T> {
+impl<T: VmContext> Default for LispValue<T> {
+    fn default() -> Self {
+        Self::Nil
+    }
+}
+
+impl<T: VmContext> LispValue<T> {
     pub fn get_pretty_name(&self) -> &'static str {
         match self {
             LispValue::Nil => "Nil",
@@ -326,7 +415,11 @@ impl<T> LispValue<T> {
                          .map(|sf| {
                              lisp_lit!{ {p};
                                  ((sym sf.name_clone())
-                                  ([sf.position().file_clone()]
+                                  ({SExpression::String(match sf.position().file() {
+                                      PositionSource::File(f) => format!("{:?}", f),
+                                      PositionSource::Repl => "<repl>".to_string(),
+                                      PositionSource::Test => "<test>".to_string(),
+                                   }.into())}
                                    {SExpression::Int(sf.position().line().try_into().unwrap())}
                                    {SExpression::Int(sf.position().col().try_into().unwrap())}))
                              }
@@ -343,79 +436,79 @@ impl<T> LispValue<T> {
     }
 }
 
-impl<T> From<Symbol> for LispValue<T> {
+impl<T: VmContext> From<Symbol> for LispValue<T> {
     fn from(s: Symbol) -> Self {
         Self::Symbol(s)
     }
 }
 
-impl<T> From<i64> for LispValue<T> {
+impl<T: VmContext> From<i64> for LispValue<T> {
     fn from(i: i64) -> Self {
         Self::Int(i)
     }
 }
 
-impl<T> From<f64> for LispValue<T> {
+impl<T: VmContext> From<f64> for LispValue<T> {
     fn from(f: f64) -> Self {
         Self::Float(f)
     }
 }
 
-impl<T> From<String> for LispValue<T> {
+impl<T: VmContext> From<String> for LispValue<T> {
     fn from(s: String) -> Self {
         Self::String(s.into())
     }
 }
 
-impl<T> From<&str> for LispValue<T> {
+impl<T: VmContext> From<&str> for LispValue<T> {
     fn from(s: &str) -> Self {
         Self::String(s.into())
     }
 }
 
-impl<T> From<&Arc<str>> for LispValue<T> {
+impl<T: VmContext> From<&Arc<str>> for LispValue<T> {
     fn from(s: &Arc<str>) -> Self {
         Self::String(Arc::clone(s))
     }
 }
 
-impl<T> From<Arc<str>> for LispValue<T> {
+impl<T: VmContext> From<Arc<str>> for LispValue<T> {
     fn from(s: Arc<str>) -> Self {
         Self::String(s)
     }
 }
 
-impl<T> From<List<T>> for LispValue<T> {
+impl<T: VmContext> From<List<T>> for LispValue<T> {
     fn from(l: List<T>) -> Self {
         Self::List(l)
     }
 }
 
-impl<T> FromIterator<LispValue<T>> for LispValue<T> {
+impl<T: VmContext> FromIterator<LispValue<T>> for LispValue<T> {
     fn from_iter<I: IntoIterator<Item = LispValue<T>>>(iter: I) -> Self {
         Self::List(iter.into_iter().collect())
     }
 }
 
-impl<T> FromIterator<Arc<LispValue<T>>> for LispValue<T> {
+impl<T: VmContext> FromIterator<Arc<LispValue<T>>> for LispValue<T> {
     fn from_iter<I: IntoIterator<Item = Arc<LispValue<T>>>>(iter: I) -> Self {
         Self::List(iter.into_iter().collect())
     }
 }
 
-impl<T> From<RuntimeError> for LispValue<T> {
+impl<T: VmContext> From<RuntimeError> for LispValue<T> {
     fn from(e: RuntimeError) -> Self {
         Self::Error(e)
     }
 }
 
-impl<T> From<Callable<T>> for LispValue<T> {
+impl<T: VmContext> From<Callable<T>> for LispValue<T> {
     fn from(c: Callable<T>) -> Self {
         Self::Callable(c)
     }
 }
 
-impl<T> Debug for LispValue<T> {
+impl<T: VmContext> Debug for LispValue<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut st = f.debug_struct("LispValue");
         match self {
@@ -432,7 +525,7 @@ impl<T> Debug for LispValue<T> {
     }
 }
 
-pub struct EnvironmentBuilder<T> {
+pub struct EnvironmentBuilder<T: VmContext> {
     name: Option<Arc<str>>,
     parent: Option<SharedContainer<Environment<T>>>,
     variables: Option<HashMap<Symbol, MutVarRef<T>>>,
@@ -444,7 +537,7 @@ pub struct EnvironmentBuilder<T> {
     is_global: bool,
 }
 
-impl<T> EnvironmentBuilder<T> {
+impl<T: VmContext> EnvironmentBuilder<T> {
     pub fn new<N: Into<Arc<str>>>(name: N, entry_position: Position) -> Self {
         EnvironmentBuilder {
             name: Some(name.into()),
@@ -497,8 +590,8 @@ impl<T> EnvironmentBuilder<T> {
         self
     }
 
-    pub fn set_documentation<IS: Into<Arc<str>>>(mut self, documentation: IS) -> Self {
-        self.documentation = Some(documentation.into());
+    pub fn set_documentation<IS: Into<Arc<str>>>(mut self, documentation: Option<IS>) -> Self {
+        self.documentation = documentation.map(IS::into);
         self
     }
 
@@ -527,7 +620,7 @@ impl<T> EnvironmentBuilder<T> {
     }
 }
 
-pub struct Environment<T> {
+pub struct Environment<T: VmContext> {
     name: Option<Arc<str>>,
     parent: Option<SharedContainer<Environment<T>>>,
     variables: HashMap<Symbol, MutVarRef<T>>,
@@ -539,7 +632,7 @@ pub struct Environment<T> {
     is_global: bool,
 }
 
-impl<'a, T: 'a> Environment<T> {
+impl<'a, T: VmContext + 'a> Environment<T> {
     pub fn get_env(
         lock: &'a SharedContainer<Environment<T>>,
         pos: &Position,
@@ -583,7 +676,7 @@ impl<'a, T: 'a> Environment<T> {
     }
 }
 
-impl<T> Environment<T> {
+impl<T: VmContext> Environment<T> {
     fn find_variable_internal(
         &self,
         arg_name: &Symbol,
@@ -627,9 +720,23 @@ impl<T> Environment<T> {
         frame_name: &Arc<str>,
         call_position: &Position,
     ) -> Result<Option<Callable<T>>, RuntimeError> {
+        macro_rules! parent_find {
+            ($parent:expr) => {{
+                let parent = $parent.read().map_err(man_convert_to_err(
+                    frame_name,
+                    call_position,
+                    &|_| error::RuntimeErrorKind::FunctionAccess(arg_name.0.to_owned()),
+                ))?;
+
+                parent.find_function_internal(arg_name, frame_name, call_position)
+            }};
+        }
+
         if let Some((mod_name, fn_name)) = arg_name.0.split_once("::") {
-            if let Some(module) = self.modules.get(&Symbol(mod_name.into())) {
+            if let Some(module) = self.modules.get(mod_name) {
                 module.find_function_internal(&Symbol(fn_name.into()), frame_name, call_position)
+            } else if let Some(parent) = &self.parent {
+                parent_find!(parent)
             } else {
                 Ok(None)
             }
@@ -642,14 +749,7 @@ impl<T> Environment<T> {
 
             Ok(Some(var_int.clone()))
         } else if let Some(parent) = &self.parent {
-            let parent =
-                parent
-                    .read()
-                    .map_err(man_convert_to_err(frame_name, call_position, &|_| {
-                        error::RuntimeErrorKind::FunctionAccess(arg_name.0.to_owned())
-                    }))?;
-
-            parent.find_function_internal(arg_name, frame_name, call_position)
+            parent_find!(parent)
         } else {
             Ok(None)
         }
@@ -720,6 +820,10 @@ impl<T> Environment<T> {
 
             RuntimeError::new((mapper)(e), name, pos_ref.clone())
         }
+    }
+
+    pub fn set_module(&mut self, name: Symbol, module: Environment<T>) {
+        self.modules.insert(name, module);
     }
 
     pub fn set_function(&mut self, name: Symbol, func: Callable<T>) {
@@ -812,13 +916,16 @@ pub fn as_matcher(sexpr: &SExpression) -> VmSExpr<'_> {
 
 #[cfg(test)]
 mod test {
+    use crate::vm::context::SimpleContext;
+
     use super::*;
     use serpentine_macro::declare_lisp_func;
 
     #[test]
     fn macro_expansions() {
-        declare_lisp_func!(local get_ctx_2 "get-ctx-2" (ctx: u8, _pos, _env) {
-            LispValue::Int((*ctx).into()).into()
+        declare_lisp_func!(local get_ctx_2 "get-ctx-2" (ctx: SimpleContext<u8>, _pos, _env) {
+            let inner = ctx.lock().expect("could not get lock on context");
+            LispValue::Int((**inner).into()).into()
         });
 
         declare_lisp_func!(local ignore_ctx "ignore-ctx" (_pos, _env) LispValue::Nil.into());
@@ -833,8 +940,9 @@ mod test {
             LispValue::Int(args.len().try_into().unwrap()).into()
         });
 
-        declare_lisp_func!(local get_ctx "get-ctx" (ctx: u8, _pos, _env, &rest _args) {
-            LispValue::Int((*ctx).into()).into()
+        declare_lisp_func!(local get_ctx "get-ctx" (ctx: SimpleContext<u8>, _pos, _env, &rest _args) {
+            let inner = ctx.lock().expect("could not get lock on context");
+            LispValue::Int((**inner).into()).into()
         });
 
         declare_lisp_func!(local do_the_thing "do-the-thing" (_pos, _env, arg1: Int) {

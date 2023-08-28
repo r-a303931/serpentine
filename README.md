@@ -1,3 +1,3 @@
-#+title: Serpentine
+# Serpentine
 
 A Lisp interpreter written in Rust with a focus on asynchronous computation and green threads

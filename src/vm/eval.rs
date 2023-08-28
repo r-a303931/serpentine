@@ -17,7 +17,7 @@
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
 };
 
 use async_recursion::async_recursion;
@@ -25,6 +25,7 @@ use async_recursion::async_recursion;
 use crate::Position;
 
 use super::{
+    context::VmContext,
     error::{add_frame, RuntimeError, RuntimeErrorKind},
     Callable, Environment, EnvironmentBuilder, LispFunc, LispValue, List, SExpression,
     SharedContainer, Symbol,
@@ -32,7 +33,7 @@ use super::{
 
 /// Helper function to evaluate '() the form, resulting in a list of quoted
 /// forms of the values in the list of S-Expressions
-fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
+fn eval_quotes<T: VmContext + Send>(quotes: &[SExpression]) -> List<T> {
     quotes
         .iter()
         .map(|expr| match expr {
@@ -105,8 +106,8 @@ fn eval_quotes<T>(quotes: &[SExpression]) -> List<T> {
 /// Evaluates backquotes, the `() form. Needs to be async so that it can call
 /// functions like eval_one to evaluate , and ,@ forms, both as a symbol and an expr
 #[async_recursion]
-async fn eval_backquotes<T: Clone + Send + Sync>(
-    ctx: T,
+async fn eval_backquotes<T: VmContext + Send>(
+    ctx: Arc<Mutex<T>>,
     pos: &Position,
     env: SharedContainer<Environment<T>>,
     quotes: &[SExpression],
@@ -120,88 +121,85 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
     let mut results = Vec::with_capacity(quotes.len());
 
     for expr in quotes {
-        results.extend(
-            match expr {
-                SExpression::Nil => ret_simple!(LispValue::Nil),
-                SExpression::Int(i) => ret_simple!(LispValue::Int(*i)),
-                SExpression::Float(f) => ret_simple!(LispValue::Float(*f)),
-                SExpression::String(s) => ret_simple!(s.into()),
-                SExpression::Symbol(s) => ret_simple!(LispValue::Symbol(s.into())),
-                SExpression::Expr(_, q) => ret_simple!(LispValue::List(eval_quotes(q))),
-                SExpression::FuncSymbol(q) => ret_simple!(LispValue::List(
-                    [LispValue::Symbol("#'".into()), LispValue::Symbol(q.into()),]
-                        .into_iter()
-                        .collect(),
-                )),
-                SExpression::Backquote(_, q) => ret_simple!(LispValue::List(
-                    [
-                        LispValue::Symbol("`".into()),
-                        LispValue::List(eval_quotes(q)),
-                    ]
+        results.extend(match expr {
+            SExpression::Nil => ret_simple!(LispValue::Nil),
+            SExpression::Int(i) => ret_simple!(LispValue::Int(*i)),
+            SExpression::Float(f) => ret_simple!(LispValue::Float(*f)),
+            SExpression::String(s) => ret_simple!(s.into()),
+            SExpression::Symbol(s) => ret_simple!(LispValue::Symbol(s.into())),
+            SExpression::Expr(_, q) => ret_simple!(LispValue::List(eval_quotes(q))),
+            SExpression::FuncSymbol(q) => ret_simple!(LispValue::List(
+                [LispValue::Symbol("#'".into()), LispValue::Symbol(q.into()),]
                     .into_iter()
                     .collect(),
-                )),
-                SExpression::Quote(_, q) => ret_simple!(LispValue::List(
-                    [
-                        LispValue::Symbol("'".into()),
-                        LispValue::List(eval_quotes(q)),
-                    ]
-                    .into_iter()
-                    .collect(),
-                )),
-                SExpression::QuoteSymbol(q) => ret_simple!(LispValue::List(
-                    [
-                        LispValue::Symbol("quote".into()),
-                        LispValue::Symbol(q.into()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                )),
-                SExpression::UnquoteSymbol(q) => {
-                    let envi = Environment::get_env(&env, pos)?;
-                    envi.find_variable(&(q.into()), pos)?
-                        .ok_or(())
-                        .map_err(envi.map_err_kind(
-                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(q)),
-                            Some(pos),
-                        ))
-                        .map(|r| vec![r])
-                }
-                SExpression::ListSpliceSymbol(s) => {
-                    let envi = Environment::get_env(&env, pos)?;
-                    envi.find_variable(&(s.into()), pos)?
-                        .ok_or(())
-                        .map_err(envi.map_err_kind(
-                            |_| RuntimeErrorKind::VariableAccess(Arc::clone(s)),
-                            Some(pos),
-                        ))
-                        .map(|r| match &*r {
-                            LispValue::List(l) => l.iter().collect(),
-                            _ => vec![Arc::clone(&r)],
-                        })
-                }
-                SExpression::UnquoteExpression(p, s) => eval_one(
-                    ctx.clone(),
-                    pos,
-                    env.clone(),
-                    &SExpression::Expr(p.clone(), s.to_vec()),
-                )
-                .await
-                .map(|r| vec![r]),
-                SExpression::ListSpliceExpr(p, s) => eval_one(
-                    ctx.clone(),
-                    pos,
-                    env.clone(),
-                    &SExpression::Expr(p.clone(), s.to_vec()),
-                )
-                .await
-                .map(|r| match &*r {
-                    LispValue::List(l) => l.iter().collect(),
-                    _ => vec![r],
-                }),
-            }?
-            .into_iter(),
-        );
+            )),
+            SExpression::Backquote(_, q) => ret_simple!(LispValue::List(
+                [
+                    LispValue::Symbol("`".into()),
+                    LispValue::List(eval_quotes(q)),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+            SExpression::Quote(_, q) => ret_simple!(LispValue::List(
+                [
+                    LispValue::Symbol("'".into()),
+                    LispValue::List(eval_quotes(q)),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+            SExpression::QuoteSymbol(q) => ret_simple!(LispValue::List(
+                [
+                    LispValue::Symbol("quote".into()),
+                    LispValue::Symbol(q.into()),
+                ]
+                .into_iter()
+                .collect(),
+            )),
+            SExpression::UnquoteSymbol(q) => {
+                let envi = Environment::get_env(&env, pos)?;
+                envi.find_variable(&(q.into()), pos)?
+                    .ok_or(())
+                    .map_err(envi.map_err_kind(
+                        |_| RuntimeErrorKind::VariableAccess(Arc::clone(q)),
+                        Some(pos),
+                    ))
+                    .map(|r| vec![r])
+            }
+            SExpression::ListSpliceSymbol(s) => {
+                let envi = Environment::get_env(&env, pos)?;
+                envi.find_variable(&(s.into()), pos)?
+                    .ok_or(())
+                    .map_err(envi.map_err_kind(
+                        |_| RuntimeErrorKind::VariableAccess(Arc::clone(s)),
+                        Some(pos),
+                    ))
+                    .map(|r| match &*r {
+                        LispValue::List(l) => l.iter().collect(),
+                        _ => vec![Arc::clone(&r)],
+                    })
+            }
+            SExpression::UnquoteExpression(p, s) => eval_one(
+                ctx.clone(),
+                pos,
+                env.clone(),
+                &SExpression::Expr(p.clone(), s.to_vec()),
+            )
+            .await
+            .map(|r| vec![r]),
+            SExpression::ListSpliceExpr(p, s) => eval_one(
+                ctx.clone(),
+                pos,
+                env.clone(),
+                &SExpression::Expr(p.clone(), s.to_vec()),
+            )
+            .await
+            .map(|r| match &*r {
+                LispValue::List(l) => l.iter().collect(),
+                _ => vec![r],
+            }),
+        }?);
     }
 
     Ok(results.into_iter().collect())
@@ -209,7 +207,7 @@ async fn eval_backquotes<T: Clone + Send + Sync>(
 
 /// Helper function for the `quote` special form. Takes in the single expression
 /// and returns it in its quoted form, most useful for turning Exprs into Lists
-fn eval_quote<T>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
+fn eval_quote<T: VmContext + Send>(expr: &SExpression) -> Result<LispValue<T>, RuntimeError> {
     match expr {
         SExpression::Nil => Ok(LispValue::Nil),
         SExpression::Int(i) => Ok(LispValue::Int(*i)),
@@ -284,9 +282,9 @@ static CURRENT_UNNAMED_FUNC: AtomicU64 = AtomicU64::new(0);
 /// that a special form was called, whereas None means no special form was called
 /// and the evaluator should instead continue to look for a function to execute
 #[async_recursion]
-async fn dispatch_special_form<T: Clone + Send + Sync>(
+async fn dispatch_special_form<T: VmContext + Send>(
     name: &str,
-    ctx: T,
+    ctx: Arc<Mutex<T>>,
     pos: &Position,
     env: SharedContainer<Environment<T>>,
     args: &[SExpression],
@@ -513,19 +511,75 @@ async fn dispatch_special_form<T: Clone + Send + Sync>(
                 Err(e) => Some(Ok(Arc::new(LispValue::Error(e)))),
             }
         }
-        "defmodule" => None,
-        "include" => None,
+        "defmodule" => {
+            if args.is_empty() {
+                throw_wac!("defmodule");
+            }
+
+            let name = match &args[0] {
+                SExpression::Symbol(name) => Arc::clone(name),
+                other => throw_wta!("Symbol", other.get_pretty_name()),
+            };
+
+            let docs = match args.get(1) {
+                Some(SExpression::String(docs)) => Some(Arc::clone(docs)),
+                _ => None,
+            };
+
+            let body = match docs {
+                Some(..) => &args[2..],
+                None => &args[1..],
+            };
+
+            let new_env = EnvironmentBuilder::<T>::new(name.clone(), pos.clone())
+                .set_documentation(docs)
+                .build();
+
+            let new_env = Arc::new(RwLock::new(new_env));
+
+            for body_part in body {
+                _ = tryy!(eval_one(ctx.clone(), pos, new_env.clone(), body_part).await);
+            }
+
+            {
+                let mut envi = tryy!(Environment::get_env_mut(&env, pos));
+                let env_name = tryy!(envi.get_environment_name(pos));
+
+                let new_env =
+                    tryy!(
+                        tryy!(Arc::into_inner(new_env).ok_or_else(|| RuntimeError::new(
+                            RuntimeErrorKind::Other(
+                                "environment captured while defining module".into()
+                            ),
+                            env_name,
+                            pos.clone()
+                        )))
+                        .into_inner()
+                        .map_err(envi.convert_err_kind(Some(pos)))
+                    );
+
+                envi.set_module(name.into(), new_env);
+            };
+
+            Some(Ok(Arc::new(LispValue::Nil)))
+        }
+        "include" => {
+            // "include";
+
+            None
+        }
+        "use" => None,
         // "error" => None,
         _ => None,
     }
 }
 
-/// Internal function used to assist eval_one, specifically with regards to
+/// Function used to assist eval_one, specifically with regards to
 /// calling a function using an S-Expression of the form: `(func_name)`
 #[async_recursion]
-async fn execute_callable<T: Clone + Send + Sync>(
+pub async fn execute_callable<T: VmContext + Send>(
     callable: Callable<T>,
-    ctx: T,
+    ctx: Arc<Mutex<T>>,
     pos: &Position,
     env: SharedContainer<Environment<T>>,
     args: &[SExpression],
@@ -631,8 +685,8 @@ async fn execute_callable<T: Clone + Send + Sync>(
 /// The position provided is where in the file the source code is that
 /// resulted in the expression being evaluated
 #[async_recursion]
-pub async fn eval_one<T: Clone + Send + Sync>(
-    ctx: T,
+pub async fn eval_one<T: VmContext + Send>(
+    ctx: Arc<Mutex<T>>,
     pos: &Position,
     env: SharedContainer<Environment<T>>,
     arg: &SExpression,
@@ -716,7 +770,7 @@ mod test {
 
     use crate::{
         parser, tokenizer,
-        vm::{EnvironmentBuilder, LispValue},
+        vm::{context::SimpleContext, EnvironmentBuilder, LispValue},
         Position,
     };
 
@@ -836,7 +890,7 @@ mod test {
             write_eval_test!(fn $test_name $($err)? ($inp => $res, ($($var_name => $var_value),*), env, position) { $($body)* });
         };
         (fn $test_name:ident $($err:ident)? ($inp:expr => $res:ident, ($($var_name:ident => $var_value:expr),*), $env_name:ident, $pos_name:ident) { $($body:tt)* }) => {
-            write_eval_test!(fn $test_name $($err)? (ctx, (); $inp => $res, ($($var_name => $var_value),*), $env_name, $pos_name) { $($body)* });
+            write_eval_test!(fn $test_name $($err)? (ctx, Arc::new(Mutex::new(())); $inp => $res, ($($var_name => $var_value),*), $env_name, $pos_name) { $($body)* });
         };
         (fn $test_name:ident $($err:ident)? ($ctx_name:ident, $ctx:expr; $inp:expr => $res:ident, ($($var_name:ident => $var_value:expr),*), $env_name:ident, $pos_name:ident) { $($body:tt)* }) => {
             #[tokio::test]
@@ -940,19 +994,19 @@ mod test {
         ret_1 => LispValue::Callable(ret_1::new())
     )));
 
-    serpentine_macro::declare_lisp_func!(local inc_1 "inc-1" (ctx: Arc<Mutex<u8>>, _pos, _env) {
+    serpentine_macro::declare_lisp_func!(local inc_1 "inc-1" (ctx: SimpleContext<u8>, _pos, _env) {
         let mut inner = ctx.lock().expect("could not get counter");
-        *inner += 1;
-        LispValue::Int((*inner).into()).into()
+        **inner += 1;
+        LispValue::Int((**inner).into()).into()
     });
-    write_eval_test!(fn test_eval_if5 (ctx, Arc::new(Mutex::new(1u8)); "(if (inc_1) (inc_1) (inc_1) (inc_1))" => eval_res, (
+    write_eval_test!(fn test_eval_if5 (ctx, Arc::new(Mutex::new(SimpleContext::new(1u8))); "(if (inc_1) (inc_1) (inc_1) (inc_1))" => eval_res, (
         inc_1 => LispValue::Callable(inc_1::new())
     ), env, pos) {
         let LispValue::Int(ref val) = *eval_res else { panic!("did not get expected value (expected Int, but got {})", eval_res.get_pretty_name()); };
         assert_eq!(val, &3);
 
         let inner = ctx.lock().expect("could not get counter");
-        assert_eq!(*inner, 3);
+        assert_eq!(**inner, 3);
     });
 
     write_eval_test!(fn test_eval_setq ("(setq asdf 1)" => eval_res, (), env, pos) {

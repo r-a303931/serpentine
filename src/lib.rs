@@ -20,6 +20,7 @@
 
 use std::{
     fmt::{self, Display},
+    path::Path,
     sync::Arc,
 };
 
@@ -50,11 +51,35 @@ impl From<vm::error::RuntimeError> for SerpentineError {
     }
 }
 
+#[non_exhaustive]
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum PositionSource {
+    File(Arc<Path>),
+    Repl,
+    Test,
+}
+
+impl std::fmt::Display for PositionSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(p) => write!(f, "{:?}", p),
+            Self::Repl => write!(f, "<repl>"),
+            Self::Test => write!(f, "<test>"),
+        }
+    }
+}
+
+impl<IS: Into<Arc<Path>>> From<IS> for PositionSource {
+    fn from(value: IS) -> Self {
+        Self::File(value.into())
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Position {
     line: usize,
     col: usize,
-    file: Arc<str>,
+    source: PositionSource,
 }
 
 impl Position {
@@ -66,30 +91,27 @@ impl Position {
         self.col
     }
 
-    pub fn file(&self) -> &str {
-        &self.file
+    pub fn file(&self) -> &PositionSource {
+        &self.source
     }
 
-    pub fn file_clone(&self) -> Arc<str> {
-        Arc::clone(&self.file)
-    }
-
-    pub fn new<IS: Into<Arc<str>>>(file: IS, line: usize, col: usize) -> Self {
+    pub fn new<IS: Into<PositionSource>>(source: IS, line: usize, col: usize) -> Self {
         Self {
             line,
             col,
-            file: file.into(),
+            source: source.into(),
         }
     }
 }
 
 impl Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}:{}", self.file, self.line, self.col)
+        write!(f, "{}:{}:{}", self.source, self.line, self.col)
     }
 }
 
 #[macro_use]
 pub mod parser;
+pub mod stdlib;
 pub mod tokenizer;
 pub mod vm;

@@ -452,7 +452,7 @@ pub fn declare_lisp_func(input: TokenStream) -> TokenStream {
             impl #lisprs::vm::LispAsyncNativeFunc<#ctx_type> for #name {
                 fn run<'life0, 'life1, 'life2, 'async_trait>(
                     &'life0 self,
-                    ctx: (&'life1 #ctx_type, &'life2 Position),
+                    ctx: (&'life1 Arc<Mutex<#ctx_type>>, &'life2 Position),
                     env: #lisprs::vm::SharedContainer<#lisprs::vm::Environment<#ctx_type>>,
                     args: Vec<std::sync::Arc<LispValue<#ctx_type>>>
                 ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<std::sync::Arc<LispValue<#ctx_type>>, RuntimeError>> + ::core::marker::Send + 'async_trait>>
@@ -463,7 +463,7 @@ pub fn declare_lisp_func(input: TokenStream) -> TokenStream {
                     Self: 'async_trait
                 {
                     async fn run(
-                        __hidden_base_ctx: (&#ctx_type, &#lisprs::Position),
+                        __hidden_base_ctx: (&Arc<Mutex<#ctx_type>>, &#lisprs::Position),
                         #env_name: #lisprs::vm::SharedContainer<#lisprs::vm::Environment<#ctx_type>>,
                         __hidden_args: Vec<std::sync::Arc<#lisprs::vm::LispValue<#ctx_type>>>
                     ) -> Result<std::sync::Arc<LispValue<#ctx_type>>, RuntimeError> {
@@ -505,7 +505,7 @@ pub fn declare_lisp_func(input: TokenStream) -> TokenStream {
             impl #lisprs::vm::LispNativeFunc<#ctx_type> for #name {
                 fn run(
                     &self,
-                    __hidden_base_ctx: (&#ctx_type, &#lisprs::Position),
+                    __hidden_base_ctx: (&Arc<Mutex<#ctx_type>>, &#lisprs::Position),
                     #env_name: #lisprs::vm::SharedContainer<#lisprs::vm::Environment<#ctx_type>>,
                     __hidden_args: Vec<std::sync::Arc<#lisprs::vm::LispValue<#ctx_type>>>
                 ) -> Result<std::sync::Arc<#lisprs::vm::LispValue<#ctx_type>>, #lisprs::vm::error::RuntimeError> {

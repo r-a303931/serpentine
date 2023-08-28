@@ -15,8 +15,6 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-use std::sync::Arc;
-
 use crate::Position;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,14 +100,11 @@ fn to_string_end(ptr: &[char]) -> Option<(&[char], &[char])> {
     }
 }
 
-pub fn tokenize(input: &InputFile) -> Result<Vec<Token<'_>>, TokenizerError> {
+pub fn tokenize(
+    mut content_ptr: &[char],
+    mut current_position: Position,
+) -> Result<Vec<Token<'_>>, TokenizerError> {
     let mut return_value = vec![];
-    let mut content_ptr = &*input.contents;
-    let mut current_position = Position {
-        file: Arc::from(input.name.to_owned()),
-        line: 1,
-        col: 0,
-    };
 
     macro_rules! simple_push {
         ($token:tt, $count:expr) => {{

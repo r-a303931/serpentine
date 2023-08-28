@@ -38,6 +38,7 @@ pub enum RuntimeErrorKind {
     WrongTypeArgument(Arc<str>, Arc<str>),
     InvalidFunctionName(Arc<str>),
     InvalidFunctionDefinition(Arc<str>),
+    Other(Arc<str>),
 }
 
 impl From<std::io::Error> for RuntimeErrorKind {
